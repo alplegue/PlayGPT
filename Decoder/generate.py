@@ -1,7 +1,7 @@
 import argparse
 import torch
 import time
-from model import Decoder_Only_Transformer, generate_stream
+from model import Decoder_Only_Transformer
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", default="lorca.pt")
@@ -26,7 +26,7 @@ prompt = "".join(c for c in args.prompt if c in stoi) or "\n"   # gets rid of ch
 idx = torch.tensor([[stoi[c] for c in prompt]], dtype=torch.long, device=device)
 
 print(prompt, end="", flush=True)
-for tok in generate_stream(model, idx, args.tokens, temperature=args.temperature, top_k=args.top_k):
+for tok in model.generate_stream(idx, args.tokens, temperature=args.temperature, top_k=args.top_k):
     print(itos[tok], end="", flush=True)
     time.sleep(0.02)                          # opcional: efecto "máquina de escribir"
 print()

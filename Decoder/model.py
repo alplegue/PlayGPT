@@ -33,23 +33,6 @@ class Head(torch.nn.Module):
         return mask
 
 
-class MLP(torch.nn.Module):
-
-    def __init__(self, d_model):
-            
-        super().__init__()
-        self.W_ff1 = torch.nn.Linear(d_model, 4*d_model)
-        self.W_ff2 = torch.nn.Linear(4*d_model, d_model)
-
-    def forward(self, X):
-
-        linear_1 = self.W_ff1(X)
-        non_linearity = torch.nn.functional.gelu(linear_1)
-        linear_2 = self.W_ff2(non_linearity)
-        return linear_2
-
-        
-
 class MultiHead(torch.nn.Module):
     
     def __init__(self, block_size, d_model, n_heads, d_k):
@@ -65,6 +48,23 @@ class MultiHead(torch.nn.Module):
         added_weights = [head(X_e) for head in self.heads]
         concat = torch.cat(added_weights, dim = -1)
         return self.W_o(concat)
+
+
+class MLP(torch.nn.Module):
+
+    def __init__(self, d_model):
+            
+        super().__init__()
+        self.W_ff1 = torch.nn.Linear(d_model, 4*d_model)
+        self.W_ff2 = torch.nn.Linear(4*d_model, d_model)
+
+    def forward(self, X):
+
+        linear_1 = self.W_ff1(X)
+        non_linearity = torch.nn.functional.gelu(linear_1)
+        linear_2 = self.W_ff2(non_linearity)
+        return linear_2
+
 
 class Block(torch.nn.Module):
      
@@ -122,19 +122,18 @@ class Decoder_Only_Transformer(torch.nn.Module):
         return logits, loss
 
 
-
-@torch.no_grad()
-def generate_stream(modelo, idx, max_new_tokens, temperature=1.0, top_k=None):
-    modelo.eval()
-    block_size = modelo.pos_encoding.shape[0]
-    for _ in range(max_new_tokens):
-        idx_cond = idx[:, -block_size:]
-        logits, _ = modelo(idx_cond)
-        logits = logits[:, -1, :] / temperature
-        if top_k is not None:
-            v, _ = torch.topk(logits, top_k)
-            logits[logits < v[:, [-1]]] = float('-inf')
-        probs = torch.softmax(logits, dim=-1)
-        next_tok = torch.multinomial(probs, num_samples=1)
-        idx = torch.cat([idx, next_tok], dim=1)
-        yield next_tok.item()                 
+    @torch.no_grad()
+    def generate_stream(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+        self.eval()
+        block_size = self.pos_encoding.shape[0]
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -block_size:]
+            logits, _ = self(idx_cond)
+            logits = logits[:, -1, :] / temperature
+            if top_k is not None:
+                v, _ = torch.topk(logits, top_k)
+                logits[logits < v[:, [-1]]] = float('-inf')
+            probs = torch.softmax(logits, dim=-1)
+            next_tok = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat([idx, next_tok], dim=1)
+            yield next_tok.item()                 
