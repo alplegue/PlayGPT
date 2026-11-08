@@ -6,7 +6,7 @@ from model import Decoder_Only_Transformer
 parser = argparse.ArgumentParser()
 parser.add_argument("--ckpt", default="lorca.pt")
 parser.add_argument("--prompt", default="\n")
-parser.add_argument("--tokens", type=int, default=500)
+parser.add_argument("--tokens", type=int, default=100)
 parser.add_argument("--temperature", type=float, default=0.8)
 parser.add_argument("--top_k", type=int, default=20)
 args = parser.parse_args()
@@ -28,5 +28,4 @@ idx = torch.tensor([[stoi[c] for c in prompt]], dtype=torch.long, device=device)
 print(prompt, end="", flush=True)
 for tok in model.generate_stream(idx, args.tokens, temperature=args.temperature, top_k=args.top_k):
     print(itos[tok], end="", flush=True)
-    time.sleep(0.02)                          # opcional: efecto "máquina de escribir"
-print()
+    time.sleep(0.02)                          # mahcine effects, like a typewriter"
