@@ -87,6 +87,7 @@ class Decoder_Only_Transformer(torch.nn.Module):
     def __init__(self, vocab_size, block_size, d_model, n_heads = 1, d_k = None, n_layers = 1):
 
         super().__init__()
+        self.block_size = block_size
         self.embedding = torch.nn.Embedding(vocab_size, d_model) 
         self.blocks = torch.nn.ModuleList([Block(block_size, d_model, n_heads, d_k) for _ in range(n_layers)])
         self.ln_f = torch.nn.LayerNorm(d_model)
@@ -136,4 +137,4 @@ class Decoder_Only_Transformer(torch.nn.Module):
             probs = torch.softmax(logits, dim=-1)
             next_tok = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_tok], dim=1)
-            yield next_tok.item()                 
+            yield next_tok.item()
