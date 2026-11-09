@@ -1,5 +1,7 @@
+import os
+import json
+import time
 import torch
-import matplotlib.pyplot as plt
 from tokenizers import Tokenizer, models, pre_tokenizers, trainers, decoders
 from model import Decoder_Only_Transformer
 
@@ -48,15 +50,15 @@ def evaluate(model, data, batch_size, iters=20):
     return torch.stack(losses).mean().item()
 
 
-def train(model, train_data, val_data, steps, batch_size, eval_every=100):
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=100):
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     history = []
 
     for step, (x, y) in enumerate(batches(train_data, steps, batch_size, model.block_size)):
         if step % eval_every == 0:
             train_loss = evaluate(model, train_data, batch_size)
             val_loss = evaluate(model, val_data, batch_size)
-            history.append((train_loss, val_loss))
+            history.append((step, train_loss, val_loss))
             print(f"step {step}: "f"train loss {train_loss:.4f}, "f"val loss {val_loss:.4f}")
 
         _, loss = model(x, y)
@@ -73,7 +75,8 @@ if __name__ == "__main__":
     text = load_text(PATH)
     n = int(0.9 * len(text))
     train_text, val_text = text[:n], text[n:]
-    results = {}
+    train_cfg = dict(steps=2000, batch_size=32, lr=1e-3, eval_every=100)
+    os.makedirs("logs", exist_ok=True)
 
     for name, bpe_vocab in [("char", None), ("bpe-512", 512)]:
 
@@ -83,8 +86,25 @@ if __name__ == "__main__":
 
         config = dict(vocab_size=vocab_size, block_size=64, d_model=64, n_heads=4, n_layers=4)
         model = Decoder_Only_Transformer(**config).to(device)
-        history = train(model, train_data, val_data, steps=2000, batch_size=32, eval_every=100)
+        t0 = time.time()
+        history = train(model, train_data, val_data, **train_cfg)
+        elapsed = time.time() - t0
+
         r_train = len(train_data) / len(train_text)
         r_val = len(val_data) / len(val_text)
-        results[name] = [(t * r_train, v * r_val) for t, v in history]
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        log = {
+            "name": name,
+            "date": stamp,
+            "device": device,
+            "model": config,
+            "n_params": sum(p.numel() for p in model.parameters()),
+            "train": train_cfg,
+            "tokens": dict(train=len(train_data), val=len(val_data), chars_per_token=1 / r_train),
+            "train_time_s": elapsed,
+            "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val)
+                        for s, t, v in history],
+        }
+        with open(f"logs/{stamp}_{name}.json", "w") as f:
+            json.dump(log, f, indent=2)
         torch.save({"model": model.state_dict(), "config": config, **tok_state}, f"lorca_{name}.pt")
