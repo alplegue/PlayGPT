@@ -6,7 +6,7 @@ from model import Decoder_Only_Transformer
 from train import PERMITTED
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--ckpt", default="lorca_char.pt")
+parser.add_argument("--ckpt", default="lorca_char_DecoderOnlyTransformer.pt")
 parser.add_argument("--prompt", default="\n")
 parser.add_argument("--tokens", type=int, default=100)
 parser.add_argument("--temperature", type=float, default=0.8)
@@ -16,7 +16,7 @@ args = parser.parse_args()
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 
 ckpt = torch.load(args.ckpt, map_location=device)
-model = Decoder_Only_Transformer(**ckpt["config"]).to(device)
+model = DecoderOnlyTransformerOpt(**ckpt["config"]).to(device)
 model.load_state_dict(ckpt["model"])
 model.eval()
 

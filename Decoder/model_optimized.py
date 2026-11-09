@@ -5,10 +5,16 @@ import torch
 for traning and inference:
     - scaled_dot_product_attention
     - got rid of head class, and instead using a single linear layer to compute q,k,v
+    - shared weights between embedding and final linear layer
+    - vectorization of the sinusoidal positional encoding
+    - substituted the layerNorm with RMSNorm, which is faster and has been shown to perform better in some cases
+    -
     '''
 
 class MultiHead(torch.nn.Module):
+
     def __init__(self, d_model, n_heads, d_k=None):
+
         super().__init__()
         assert d_model % n_heads == 0
         self.h = n_heads
@@ -17,7 +23,9 @@ class MultiHead(torch.nn.Module):
         self.W_qkv = torch.nn.Linear(d_model, n_heads * (2 * self.d_k + self.d_v))
         self.W_o = torch.nn.Linear(n_heads * self.d_v, d_model)
 
+
     def forward(self, X):
+
         B, T, _ = X.shape
         hk, hv = self.h * self.d_k, self.h * self.d_v
         q, k, v = self.W_qkv(X).split([hk, hk, hv], dim=-1)
@@ -25,6 +33,7 @@ class MultiHead(torch.nn.Module):
         k = k.view(B, T, self.h, self.d_k).transpose(1, 2)
         v = v.view(B, T, self.h, self.d_v).transpose(1, 2)   # (B,h,T,d_v)
         out = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
+        
         return self.W_o(out.transpose(1, 2).reshape(B, T, hv))
 
 
@@ -41,26 +50,29 @@ class MLP(torch.nn.Module):
         linear_1 = self.W_ff1(X)
         non_linearity = torch.nn.functional.gelu(linear_1)
         linear_2 = self.W_ff2(non_linearity)
+
         return linear_2
 
 
 class Block(torch.nn.Module):
      
     def __init__(self, d_model, n_heads, d_k):
+
         super().__init__()
         self.att = MultiHead(d_model, n_heads, d_k)
-        self.ln_1 = torch.nn.LayerNorm(d_model)
+        self.ln_1 = torch.nn.RMSNorm(d_model)
         self.mlp = MLP(d_model)
-        self.ln_2 = torch.nn.LayerNorm(d_model)
+        self.ln_2 = torch.nn.RMSNorm(d_model)
 
     def forward(self, X):
 
         X = X + self.att(self.ln_1(X))
         X = X + self.mlp(self.ln_2(X))
+
         return X
 
 
-class Decoder_Only_Transformer(torch.nn.Module):
+class DecoderOnlyTransformerOpt(torch.nn.Module):
 
     def __init__(self, vocab_size, block_size, d_model, n_heads = 1, d_k = None, n_layers = 1):
 
@@ -68,20 +80,24 @@ class Decoder_Only_Transformer(torch.nn.Module):
         self.block_size = block_size
         self.embedding = torch.nn.Embedding(vocab_size, d_model) 
         self.blocks = torch.nn.ModuleList([Block(d_model, n_heads, d_k) for _ in range(n_layers)])
-        self.ln_f = torch.nn.LayerNorm(d_model)
-        self.linear = torch.nn.Linear(d_model, vocab_size)
+        self.ln_f = torch.nn.RMSNorm(d_model)
+        self.linear = torch.nn.Linear(d_model, vocab_size, bias=False)
+        self.linear.weight = self.embedding.weight
         self.register_buffer("pos_encoding", self.sinusoidal_pe(block_size, d_model))
         self.loss = torch.nn.CrossEntropyLoss()
 
     
     @staticmethod
     def sinusoidal_pe(block_size, d_model):
+
+        pos = torch.arange(block_size).unsqueeze(1)
+        i = torch.arange(0, d_model, 2)
+        denom = torch.exp(-math.log(10000) * i / d_model)
         pe = torch.zeros(block_size, d_model)
-        for pos in range(block_size):
-            for i in range(0, d_model, 2):
-                denom = 10000 ** (i / d_model)
-                pe[pos, i]     = math.sin(pos / denom)
-                pe[pos, i + 1] = math.cos(pos / denom)
+
+        pe[:, 0::2] = torch.sin(pos * denom)
+        pe[:, 1::2] = torch.cos(pos * denom[:pe[:, 1::2].shape[1]])
+
         return pe
 
     
@@ -103,6 +119,7 @@ class Decoder_Only_Transformer(torch.nn.Module):
 
     @torch.no_grad()
     def generate_stream(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+
         self.eval()
         block_size = self.pos_encoding.shape[0]
         for _ in range(max_new_tokens):
@@ -115,4 +132,5 @@ class Decoder_Only_Transformer(torch.nn.Module):
             probs = torch.softmax(logits, dim=-1)
             next_tok = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_tok], dim=1)
+
             yield next_tok.item()

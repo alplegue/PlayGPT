@@ -82,7 +82,7 @@ class Block(torch.nn.Module):
         return X
 
 
-class Decoder_Only_Transformer(torch.nn.Module):
+class DecoderOnlyTransformer(torch.nn.Module):
 
     def __init__(self, vocab_size, block_size, d_model, n_heads = 1, d_k = None, n_layers = 1):
 
