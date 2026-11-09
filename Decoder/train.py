@@ -68,15 +68,21 @@ def train(model, train_data, val_data, steps, batch_size, eval_every=100):
 
 
 if __name__ == "__main__":
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
     text = load_text(PATH)
     n = int(0.9 * len(text))
     train_text, val_text = text[:n], text[n:]
     results = {}
 
     for name, bpe_vocab in [("char", None), ("bpe-512", 512)]:
+
         train_data, val_data, vocab_size, tok_state = tokenize(train_text, val_text, bpe_vocab)
+        train_data = train_data.to(device)
+        val_data = val_data.to(device)
+
         config = dict(vocab_size=vocab_size, block_size=64, d_model=64, n_heads=4, n_layers=4)
-        model = Decoder_Only_Transformer(**config)
+        model = Decoder_Only_Transformer(**config).to(device)
         history = train(model, train_data, val_data, steps=2000, batch_size=32, eval_every=100)
         r_train = len(train_data) / len(train_text)
         r_val = len(val_data) / len(val_text)

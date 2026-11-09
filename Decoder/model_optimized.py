@@ -1,39 +1,31 @@
 import math
 import torch
 
-
-class Head(torch.nn.Module):
-
-    def __init__(self,d_model, d_v, d_k):
-        super().__init__()
-        self.d_k = d_k
-        self.W_q = torch.nn.Linear(d_model, d_k)
-        self.W_k = torch.nn.Linear(d_model, d_k)
-        self.W_v = torch.nn.Linear(d_model, d_v)
-
-
-    def forward(self, X_e):
-        Q = self.W_q(X_e) #(B,T,d_k)
-        K = self.W_k(X_e) #(B,T,d_k)
-        V = self.W_v(X_e) #(B,T,d_v)
-        return torch.nn.functional.scaled_dot_product_attention(Q, K, V, is_causal=True) #(B,T,d_v)
-
+''' This is mirror of the model.py file, representing the exact same model, but with some optimizations
+for traning and inference:
+    - scaled_dot_product_attention
+    - got rid of head class, and instead using a single linear layer to compute q,k,v
+    '''
 
 class MultiHead(torch.nn.Module):
-    
-    def __init__(self, d_model, n_heads, d_k):
+    def __init__(self, d_model, n_heads, d_k=None):
         super().__init__()
         assert d_model % n_heads == 0
-        d_v = d_model // n_heads
-        d_k = d_k if d_k is not None else d_v
-        self.heads = torch.nn.ModuleList([Head(d_model, d_v, d_k) for _ in range(n_heads)])
-        self.W_o = torch.nn.Linear(d_model, d_model)
+        self.h = n_heads
+        self.d_v = d_model // n_heads
+        self.d_k = d_k if d_k is not None else self.d_v
+        self.W_qkv = torch.nn.Linear(d_model, n_heads * (2 * self.d_k + self.d_v))
+        self.W_o = torch.nn.Linear(n_heads * self.d_v, d_model)
 
-    def forward(self, X_e):
-
-        added_weights = [head(X_e) for head in self.heads]
-        concat = torch.cat(added_weights, dim = -1)
-        return self.W_o(concat)
+    def forward(self, X):
+        B, T, _ = X.shape
+        hk, hv = self.h * self.d_k, self.h * self.d_v
+        q, k, v = self.W_qkv(X).split([hk, hk, hv], dim=-1)
+        q = q.view(B, T, self.h, self.d_k).transpose(1, 2)   # (B,h,T,d_k)
+        k = k.view(B, T, self.h, self.d_k).transpose(1, 2)
+        v = v.view(B, T, self.h, self.d_v).transpose(1, 2)   # (B,h,T,d_v)
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=True)
+        return self.W_o(out.transpose(1, 2).reshape(B, T, hv))
 
 
 class MLP(torch.nn.Module):
