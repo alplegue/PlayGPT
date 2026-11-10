@@ -70,6 +70,8 @@ def evaluate(model, data, batch_size, iters=20):
 
     return torch.stack(losses).mean().item()
 
+def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=100):
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, fused=True)
     history = []
     tokens_per_s = 0.0
