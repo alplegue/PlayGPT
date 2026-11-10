@@ -70,33 +70,30 @@ def evaluate(model, data, batch_size, iters=20):
 
     return torch.stack(losses).mean().item()
 
-
-def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=100):
-
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, fused=True)
     history = []
+    tokens_per_s = 0.0
 
     for step, (x, y) in enumerate(batches(train_data, steps, batch_size, model.block_size)):
         if step % eval_every == 0:
+            if step > 0:
+                torch.mps.synchronize()
+                tokens_per_s = batch_size * model.block_size * eval_every / (time.time() - t0)
             train_loss = evaluate(model, train_data, batch_size)
             val_loss = evaluate(model, val_data, batch_size)
-            history.append((step, train_loss, val_loss, ))
-            print(f"step {step}: "f"train loss {train_loss:.4f}, "f"val loss {val_loss:.4f}, "f"tokens/s {tokens_per_s:.4f}")
+            history.append((step, train_loss, val_loss))
+            print(f"step {step}: train loss {train_loss:.4f}, val loss {val_loss:.4f}, tokens/s {tokens_per_s:.0f}")
+            t0 = time.time()
 
-        t0 = time.time()
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
-
             _, loss = model(x, y)
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
-            
-        torch.mps.synchronize()
-        t1 = time.time()
-        elapsed = t1 - t0
-        tokens_per_s = batch_size * model.block_size / elapsed
+
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
 
     return history
+
 
 transformers = [DecoderOnlyTransformerOpt, DecoderOnlyTransformer]
 
