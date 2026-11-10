@@ -10,7 +10,8 @@ from model_optimized import DecoderOnlyTransformerOpt
 '''''I would like to remark some optimizations that have been made in the model_optimized.py file:
     - compiling the model with torch.compile, which is a new feature in PyTorch 2.0 that can significantly speed up training
     - using torch.autocast to automatically cast tensors to the appropriate data type for faster computation
-    - using torch.no_grad to disable gradient calculation during evaluation, which can save memory and computation'''
+    - using torch.no_grad to disable gradient calculation during evaluation, which can save memory and computation
+    - vectorization of the funcion get_batches and instantiation of the data tensor in the GPU'''
 
 PATH = "Obras_completas_ilustradas_Federico_Garcia_Lorca_djvu.txt"
 PERMITTED = set("abcdefghijklmnñopqrstuvwxyzáéíóúü"
@@ -47,12 +48,12 @@ def tokenize(train_text, val_text, bpe_vocab=None):
 
 def batches(data, n_batches, batch_size, block_size):
 
+    offsets = torch.arange(block_size + 1, device=data.device)
     for _ in range(n_batches):
-        ix = torch.randint(len(data) - block_size, (batch_size,))
-        x = torch.stack([data[i:i + block_size] for i in ix])
-        y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
+        ix = torch.randint(len(data) - block_size, (batch_size,), device=data.device).unsqueeze(1)  # (B, 1)
+        chunk = data[ix + offsets]  # (B, block_size+1), single gather
 
-        yield x, y
+        yield chunk[:, :-1], chunk[:, 1:]
 
 
 @torch.no_grad()
