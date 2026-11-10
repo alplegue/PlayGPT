@@ -9,11 +9,13 @@ from model_optimized import DecoderOnlyTransformerOpt
 
 '''''I would like to remark some optimizations that have been made in the model_optimized.py file:
     - moving the model to the apple silicon GPU
-    - compiling the model with torch.compile, which is a new feature in PyTorch 2.0 that can significantly speed up training
+    - compiling the model with torch.compile, which is a new feature in PyTorch 2.0
     - compiling the training and evaluation graphs outside the timer to avoid including compilation time in the training time measurement
     - using torch.autocast to automatically cast tensors to the appropriate data type for faster computation
     - using torch.no_grad to disable gradient calculation during evaluation, which can save memory and computation
-    - vectorization of the funcion get_batches and instantiation of the data tensor in the GPU'''
+    - vectorization of the funcion get_batches and instantiation of the data tensor in the GPU
+    - fused calculations in the AdamW optimizer, reduction of kernel launches
+    '''
 
 PATH = "Obras_completas_ilustradas_Federico_Garcia_Lorca_djvu.txt"
 PERMITTED = set("abcdefghijklmnñopqrstuvwxyzáéíóúü"
@@ -62,7 +64,8 @@ def batches(data, n_batches, batch_size, block_size):
 def evaluate(model, data, batch_size, iters=20):
 
     model.eval()
-    losses = [model(x, y)[1] for x, y in batches(data, iters, batch_size, model.block_size)]
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        losses = [model(x, y)[1] for x, y in batches(data, iters, batch_size, model.block_size)]
     model.train()
 
     return torch.stack(losses).mean().item()
@@ -77,14 +80,21 @@ def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=10
         if step % eval_every == 0:
             train_loss = evaluate(model, train_data, batch_size)
             val_loss = evaluate(model, val_data, batch_size)
-            history.append((step, train_loss, val_loss))
-            print(f"step {step}: "f"train loss {train_loss:.4f}, "f"val loss {val_loss:.4f}")
+            history.append((step, train_loss, val_loss, ))
+            print(f"step {step}: "f"train loss {train_loss:.4f}, "f"val loss {val_loss:.4f}, "f"tokens/s {tokens_per_s:.4f}")
 
+        t0 = time.time()
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
+
             _, loss = model(x, y)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+            
+        torch.mps.synchronize()
+        t1 = time.time()
+        elapsed = t1 - t0
+        tokens_per_s = batch_size * model.block_size / elapsed
 
     return history
 
@@ -113,7 +123,7 @@ if __name__ == "__main__":
 
             # warm-up: compile train and eval graphs outside the timer
             x, y = next(batches(train_data, 1, train_cfg["batch_size"], model.block_size))
-            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):   #we are training in bfloat16, the warm-up has to be done in the same precision
                 model(x, y)[1].backward()
             model.zero_grad(set_to_none=True)
             evaluate(model, val_data, train_cfg["batch_size"], iters=1)
