@@ -73,7 +73,7 @@ def evaluate(model, data, batch_size, iters=20):
 
 def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=100):
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, fused=True)
     history = []
 
     for step, (x, y) in enumerate(batches(train_data, steps, batch_size, model.block_size)):
