@@ -2,7 +2,8 @@ import argparse
 import time
 import torch
 from tokenizers import Tokenizer
-from model import Decoder_Only_Transformer
+from model import DecoderOnlyTransformer
+from model_optimized import DecoderOnlyTransformerOpt
 from train import PERMITTED
 
 parser = argparse.ArgumentParser()

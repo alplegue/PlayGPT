@@ -8,6 +8,7 @@ from model_optimized import DecoderOnlyTransformerOpt
 
 
 '''''I would like to remark some optimizations that have been made in the model_optimized.py file:
+    - moving the model to the apple silicon GPU
     - compiling the model with torch.compile, which is a new feature in PyTorch 2.0 that can significantly speed up training
     - using torch.autocast to automatically cast tensors to the appropriate data type for faster computation
     - using torch.no_grad to disable gradient calculation during evaluation, which can save memory and computation
@@ -48,7 +49,7 @@ def tokenize(train_text, val_text, bpe_vocab=None):
 
 def batches(data, n_batches, batch_size, block_size):
 
-    offsets = torch.arange(block_size + 1, device=data.device)
+    offsets = torch.arange(block_size + 1, device=data.device) #(T + 1,) tensor
     for _ in range(n_batches):
         ix = torch.randint(len(data) - block_size, (batch_size,), device=data.device).unsqueeze(1)  # (B, 1)
         chunk = data[ix + offsets]  # (B, block_size+1), single gather
@@ -107,11 +108,13 @@ if __name__ == "__main__":
 
             config = dict(vocab_size=vocab_size, block_size=32, d_model=12, n_heads=4, n_layers=1)
             model = transformer(**config).to(device)
+            torch.mps.synchronize()
             t0 = time.time()
             model = torch.compile(model, mode="reduce-overhead")
             history = train(model, train_data, val_data, **train_cfg)
+            torch.mps.synchronize()
             elapsed = time.time() - t0
-
+            tokens_per_s_mean = (train_cfg["steps"] * train_cfg["batch_size"] * model.block_size) / elapsed
             r_train = len(train_data) / len(train_text)
             r_val = len(val_data) / len(val_text)
             stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -124,6 +127,7 @@ if __name__ == "__main__":
                 "train": train_cfg,
                 "tokens": dict(train=len(train_data), val=len(val_data), chars_per_token=1 / r_train),
                 "train_time_s": elapsed,
+                "tokens_per_s_mean": tokens_per_s_mean,
                 "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val)
                             for s, t, v in history],
             }
