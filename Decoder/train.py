@@ -10,6 +10,7 @@ from model_optimized import DecoderOnlyTransformerOpt
 '''''I would like to remark some optimizations that have been made in the model_optimized.py file:
     - moving the model to the apple silicon GPU
     - compiling the model with torch.compile, which is a new feature in PyTorch 2.0 that can significantly speed up training
+    - compiling the training and evaluation graphs outside the timer to avoid including compilation time in the training time measurement
     - using torch.autocast to automatically cast tensors to the appropriate data type for faster computation
     - using torch.no_grad to disable gradient calculation during evaluation, which can save memory and computation
     - vectorization of the funcion get_batches and instantiation of the data tensor in the GPU'''
@@ -108,9 +109,17 @@ if __name__ == "__main__":
 
             config = dict(vocab_size=vocab_size, block_size=32, d_model=12, n_heads=4, n_layers=1)
             model = transformer(**config).to(device)
+            model = torch.compile(model, mode="reduce-overhead")
+
+            # warm-up: compile train and eval graphs outside the timer
+            x, y = next(batches(train_data, 1, train_cfg["batch_size"], model.block_size))
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                model(x, y)[1].backward()
+            model.zero_grad(set_to_none=True)
+            evaluate(model, val_data, train_cfg["batch_size"], iters=1)
+
             torch.mps.synchronize()
             t0 = time.time()
-            model = torch.compile(model, mode="reduce-overhead")
             history = train(model, train_data, val_data, **train_cfg)
             torch.mps.synchronize()
             elapsed = time.time() - t0
