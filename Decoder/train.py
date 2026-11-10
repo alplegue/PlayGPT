@@ -74,17 +74,17 @@ def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=10
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, fused=True)
     history = []
-    tokens_per_s = 0.0
+    training_throughput = 0.0
 
     for step, (x, y) in enumerate(batches(train_data, steps, batch_size, model.block_size)):
         if step % eval_every == 0:
             if step > 0:
                 torch.mps.synchronize()
-                tokens_per_s = batch_size * model.block_size * eval_every / (time.time() - t0)
+                training_throughput = batch_size * model.block_size * eval_every / (time.time() - t0)
             train_loss = evaluate(model, train_data, batch_size)
             val_loss = evaluate(model, val_data, batch_size)
-            history.append((step, train_loss, val_loss))
-            print(f"step {step}: train loss {train_loss:.4f}, val loss {val_loss:.4f}, tokens/s {tokens_per_s:.0f}")
+            history.append((step, train_loss, val_loss, training_throughput))
+            print(f"step {step}: train loss {train_loss:.4f}, val loss {val_loss:.4f}, tokens/s {training_throughput:.2f}")
             t0 = time.time()
 
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
@@ -132,7 +132,7 @@ if __name__ == "__main__":
             history = train(model, train_data, val_data, **train_cfg)
             torch.mps.synchronize()
             elapsed = time.time() - t0
-            tokens_per_s_mean = (train_cfg["steps"] * train_cfg["batch_size"] * model.block_size) / elapsed
+            training_throughput_avg = (train_cfg["steps"] * train_cfg["batch_size"] * model.block_size) / elapsed
             r_train = len(train_data) / len(train_text)
             r_val = len(val_data) / len(val_text)
             stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -145,9 +145,9 @@ if __name__ == "__main__":
                 "train": train_cfg,
                 "tokens": dict(train=len(train_data), val=len(val_data), chars_per_token=1 / r_train),
                 "train_time_s": elapsed,
-                "tokens_per_s_mean": tokens_per_s_mean,
-                "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val)
-                            for s, t, v in history],
+                "training_throughput_mean": training_throughput_avg,
+                "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val, training_throughput=ttp)
+                            for s, t, v, ttp in history],
             }
             with open(f"logs/{stamp}_{name}.json", "w") as f:
                 json.dump(log, f, indent=2)
