@@ -116,7 +116,7 @@ if __name__ == "__main__":
             train_data = train_data.to(device)
             val_data = val_data.to(device)
 
-            config = dict(vocab_size=vocab_size, block_size=32, d_model=12, n_heads=4, n_layers=1)
+            config = dict(vocab_size=vocab_size, block_size=64, d_model=64, n_heads=4, n_layers=4)
 
             for use_compile, amp in [(True, True), (True, False), (False, True), (False, False)]:
 
@@ -157,4 +157,4 @@ if __name__ == "__main__":
                 }
                 with open(f"logs/{stamp}_{run}.json", "w") as f:
                     json.dump(log, f, indent=2)
-                torch.save({"model": raw_model.state_dict(), "config": config, **tok_state}, f"lorca_{name}_{transformer.__name__}.pt")
+                torch.save({"model": raw_model.state_dict(), "config": config, **tok_state}, f"cervantes_{transformer.__name__}_{name}.pt")

@@ -5,7 +5,6 @@ import torch
 for traning and inference:
     - scaled_dot_product_attention
     - got rid of head class, and instead using a single linear layer to compute q,k,v
-    - shared weights between embedding and final linear layer
     - vectorization of the sinusoidal positional encoding
     - substituted the layerNorm with RMSNorm, which is faster and has been shown to perform better in some cases
     '''
@@ -77,11 +76,10 @@ class DecoderOnlyTransformerOpt(torch.nn.Module):
 
         super().__init__()
         self.block_size = block_size
-        self.embedding = torch.nn.Embedding(vocab_size, d_model) 
+        self.embedding = torch.nn.Embedding(vocab_size, d_model, std=0.02)
         self.blocks = torch.nn.ModuleList([Block(d_model, n_heads, d_k) for _ in range(n_layers)])
         self.ln_f = torch.nn.RMSNorm(d_model)
-        self.linear = torch.nn.Linear(d_model, vocab_size, bias=False)
-        self.linear.weight = self.embedding.weight
+        self.linear = torch.nn.Linear(d_model, vocab_size)
         self.register_buffer("pos_encoding", self.sinusoidal_pe(block_size, d_model))
         self.loss = torch.nn.CrossEntropyLoss()
 
