@@ -70,7 +70,13 @@ def evaluate(model, data, batch_size, amp, iters=20):
 
     return torch.stack(losses).mean().item()
 
-def train(model, train_data, val_data, steps, batch_size, amp, lr=1e-3, eval_every=100):
+def flops_per_token(model, n_layers, d_model):
+    # 6N (fwd+bwd of weights) + 12·L·T·d (attention matmuls, no params)
+    N = sum(p.numel() for p in model.parameters())
+    return 6 * N + 12 * n_layers * model.block_size * d_model
+
+
+def train(model, train_data, val_data, steps, batch_size, amp, fpt, lr=1e-3, eval_every=100):
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, fused=True)
     history = []
@@ -84,7 +90,7 @@ def train(model, train_data, val_data, steps, batch_size, amp, lr=1e-3, eval_eve
             train_loss = evaluate(model, train_data, batch_size, amp)
             val_loss = evaluate(model, val_data, batch_size, amp)
             history.append((step, train_loss, val_loss, training_throughput))
-            print(f"step {step}: train loss {train_loss:.4f}, val loss {val_loss:.4f}, tokens/s {training_throughput:.2f}")
+            print(f"step {step}: train loss {train_loss:.4f}, val loss {val_loss:.4f}, tokens/s {training_throughput:.2f}, TFLOP/s {training_throughput * fpt / 1e12:.2f}")
             t0 = time.time()
 
         with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=amp):
@@ -131,12 +137,14 @@ if __name__ == "__main__":
                 model.zero_grad(set_to_none=True)
                 evaluate(model, val_data, cfg["batch_size"], amp, iters=1)
 
+                fpt = flops_per_token(raw_model, config["n_layers"], config["d_model"])
                 torch.mps.synchronize()
                 t0 = time.time()
-                history = train(model, train_data, val_data, **cfg)
+                history = train(model, train_data, val_data, fpt=fpt, **cfg)
                 torch.mps.synchronize()
                 elapsed = time.time() - t0
                 training_throughput_avg = (cfg["steps"] * cfg["batch_size"] * model.block_size) / elapsed
+                tflops_avg_incl_eval = training_throughput_avg * fpt / 1e12
                 r_train = len(train_data) / len(train_text)
                 r_val = len(val_data) / len(val_text)
                 stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -151,8 +159,10 @@ if __name__ == "__main__":
                     "train": cfg,
                     "tokens": dict(train=len(train_data), val=len(val_data), chars_per_token=1 / r_train),
                     "train_time_s": elapsed,
-                    "training_throughput_mean": training_throughput_avg,
-                    "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val, training_throughput=ttp)
+                    "training_throughput_avg": training_throughput_avg,
+                    "flops_per_token": fpt,
+                    "tflops_avg_incl_eval": tflops_avg_incl_eval,
+                    "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val, training_throughput=ttp, tflops=ttp * fpt / 1e12)
                                 for s, t, v, ttp in history],
                 }
                 with open(f"logs/{stamp}_{run}.json", "w") as f:

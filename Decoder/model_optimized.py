@@ -76,7 +76,7 @@ class DecoderOnlyTransformerOpt(torch.nn.Module):
 
         super().__init__()
         self.block_size = block_size
-        self.embedding = torch.nn.Embedding(vocab_size, d_model, std=0.02)
+        self.embedding = torch.nn.Embedding(vocab_size, d_model)
         self.blocks = torch.nn.ModuleList([Block(d_model, n_heads, d_k) for _ in range(n_layers)])
         self.ln_f = torch.nn.RMSNorm(d_model)
         self.linear = torch.nn.Linear(d_model, vocab_size)
