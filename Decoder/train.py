@@ -104,6 +104,8 @@ def train(model, train_data, val_data, steps, batch_size, amp, fpt, lr=1e-3, eva
 
 
 transformers = [DecoderOnlyTransformerOpt, DecoderOnlyTransformer]
+SEED = 0
+PEAK_TFLOPS = {True: 2.83, False: 2.54}  # amp (bf16) / fp32, measured with peak_flops.py on M4
 
 if __name__ == "__main__":
 
@@ -126,6 +128,7 @@ if __name__ == "__main__":
 
             for use_compile, amp in [(True, True), (True, False), (False, True), (False, False)]:
 
+                torch.manual_seed(SEED)
                 cfg = train_cfg | dict(amp=amp)
                 raw_model = transformer(**config).to(device)
                 model = torch.compile(raw_model) if use_compile else raw_model
@@ -149,9 +152,11 @@ if __name__ == "__main__":
                 r_val = len(val_data) / len(val_text)
                 stamp = time.strftime("%Y%m%d-%H%M%S")
                 run = f"{transformer.__name__}_{name}_compile{int(use_compile)}_amp{int(amp)}"
+                peak = PEAK_TFLOPS[amp]
                 log = {
                     "name": run,
                     "date": stamp,
+                    "seed": SEED,
                     "device": device,
                     "compile": use_compile,
                     "model": config,
@@ -162,7 +167,9 @@ if __name__ == "__main__":
                     "training_throughput_avg": training_throughput_avg,
                     "flops_per_token": fpt,
                     "tflops_avg_incl_eval": tflops_avg_incl_eval,
-                    "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val, training_throughput=ttp, tflops=ttp * fpt / 1e12)
+                    "peak_tflops": peak,
+                    "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val, training_throughput=ttp,
+                                     tflops=ttp * fpt / 1e12, mfu=ttp * fpt / 1e12 / peak)
                                 for s, t, v, ttp in history],
                 }
                 with open(f"logs/{stamp}_{run}.json", "w") as f:
