@@ -113,7 +113,7 @@ if __name__ == "__main__":
     text = load_text(PATH)
     n = int(0.9 * len(text))
     train_text, val_text = text[:n], text[n:]
-    train_cfg = dict(steps=2000, batch_size=32, lr=1e-3, eval_every=100)
+    train_cfg = dict(steps=10000, batch_size=32, lr=1e-3, eval_every=100)
     os.makedirs("logs", exist_ok=True)
 
     for transformer in transformers:
@@ -124,7 +124,7 @@ if __name__ == "__main__":
             train_data = train_data.to(device)
             val_data = val_data.to(device)
 
-            config = dict(vocab_size=vocab_size, block_size=64, d_model=64, n_heads=4, n_layers=4)
+            config = dict(vocab_size=vocab_size, block_size=64, d_model=128, n_heads=4, n_layers=4)
 
             for use_compile, amp in [(True, True), (True, False), (False, True), (False, False)]:
 
