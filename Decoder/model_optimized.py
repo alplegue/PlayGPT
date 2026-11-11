@@ -8,7 +8,6 @@ for traning and inference:
     - shared weights between embedding and final linear layer
     - vectorization of the sinusoidal positional encoding
     - substituted the layerNorm with RMSNorm, which is faster and has been shown to perform better in some cases
-    -
     '''
 
 class MultiHead(torch.nn.Module):

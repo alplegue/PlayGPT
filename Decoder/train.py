@@ -17,7 +17,7 @@ from model_optimized import DecoderOnlyTransformerOpt
     - fused calculations in the AdamW optimizer, reduction of kernel launches
     '''
 
-PATH = "Obras_completas_ilustradas_Federico_Garcia_Lorca_djvu.txt"
+PATH = "quijote.txt"
 PERMITTED = set("abcdefghijklmnñopqrstuvwxyzáéíóúü"
                "ABCDEFGHIJKLMNÑOPQRSTUVWXYZÁÉÍÓÚÜ"
                " \n.,;:¡!¿?-'\"()")
@@ -61,16 +61,16 @@ def batches(data, n_batches, batch_size, block_size):
 
 
 @torch.no_grad()
-def evaluate(model, data, batch_size, iters=20):
+def evaluate(model, data, batch_size, amp, iters=20):
 
     model.eval()
-    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+    with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=amp):
         losses = [model(x, y)[1] for x, y in batches(data, iters, batch_size, model.block_size)]
     model.train()
 
     return torch.stack(losses).mean().item()
 
-def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=100):
+def train(model, train_data, val_data, steps, batch_size, amp, lr=1e-3, eval_every=100):
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, fused=True)
     history = []
@@ -81,13 +81,13 @@ def train(model, train_data, val_data, steps, batch_size, lr=1e-3, eval_every=10
             if step > 0:
                 torch.mps.synchronize()
                 training_throughput = batch_size * model.block_size * eval_every / (time.time() - t0)
-            train_loss = evaluate(model, train_data, batch_size)
-            val_loss = evaluate(model, val_data, batch_size)
+            train_loss = evaluate(model, train_data, batch_size, amp)
+            val_loss = evaluate(model, val_data, batch_size, amp)
             history.append((step, train_loss, val_loss, training_throughput))
             print(f"step {step}: train loss {train_loss:.4f}, val loss {val_loss:.4f}, tokens/s {training_throughput:.2f}")
             t0 = time.time()
 
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=amp):
             _, loss = model(x, y)
 
         optimizer.zero_grad(set_to_none=True)
@@ -117,38 +117,44 @@ if __name__ == "__main__":
             val_data = val_data.to(device)
 
             config = dict(vocab_size=vocab_size, block_size=32, d_model=12, n_heads=4, n_layers=1)
-            model = transformer(**config).to(device)
-            model = torch.compile(model, mode="reduce-overhead")
 
-            # warm-up: compile train and eval graphs outside the timer
-            x, y = next(batches(train_data, 1, train_cfg["batch_size"], model.block_size))
-            with torch.autocast(device_type=device, dtype=torch.bfloat16):   #we are training in bfloat16, the warm-up has to be done in the same precision
-                model(x, y)[1].backward()
-            model.zero_grad(set_to_none=True)
-            evaluate(model, val_data, train_cfg["batch_size"], iters=1)
+            for use_compile, amp in [(True, True), (True, False), (False, True), (False, False)]:
 
-            torch.mps.synchronize()
-            t0 = time.time()
-            history = train(model, train_data, val_data, **train_cfg)
-            torch.mps.synchronize()
-            elapsed = time.time() - t0
-            training_throughput_avg = (train_cfg["steps"] * train_cfg["batch_size"] * model.block_size) / elapsed
-            r_train = len(train_data) / len(train_text)
-            r_val = len(val_data) / len(val_text)
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            log = {
-                "name": name,
-                "date": stamp,
-                "device": device,
-                "model": config,
-                "n_params": sum(p.numel() for p in model.parameters()),
-                "train": train_cfg,
-                "tokens": dict(train=len(train_data), val=len(val_data), chars_per_token=1 / r_train),
-                "train_time_s": elapsed,
-                "training_throughput_mean": training_throughput_avg,
-                "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val, training_throughput=ttp)
-                            for s, t, v, ttp in history],
-            }
-            with open(f"logs/{stamp}_{name}.json", "w") as f:
-                json.dump(log, f, indent=2)
-            torch.save({"model": model.state_dict(), "config": config, **tok_state}, f"lorca_{name}_{transformer.__name__}.pt")
+                cfg = train_cfg | dict(amp=amp)
+                raw_model = transformer(**config).to(device)
+                model = torch.compile(raw_model) if use_compile else raw_model
+
+                # warm-up: compile train and eval graphs outside the timer
+                x, y = next(batches(train_data, 1, cfg["batch_size"], model.block_size))
+                with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=amp):  # same precision as training
+                    model(x, y)[1].backward()
+                model.zero_grad(set_to_none=True)
+                evaluate(model, val_data, cfg["batch_size"], amp, iters=1)
+
+                torch.mps.synchronize()
+                t0 = time.time()
+                history = train(model, train_data, val_data, **cfg)
+                torch.mps.synchronize()
+                elapsed = time.time() - t0
+                training_throughput_avg = (cfg["steps"] * cfg["batch_size"] * model.block_size) / elapsed
+                r_train = len(train_data) / len(train_text)
+                r_val = len(val_data) / len(val_text)
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                run = f"{transformer.__name__}_{name}_compile{int(use_compile)}_amp{int(amp)}"
+                log = {
+                    "name": run,
+                    "date": stamp,
+                    "device": device,
+                    "compile": use_compile,
+                    "model": config,
+                    "n_params": sum(p.numel() for p in model.parameters()),
+                    "train": cfg,
+                    "tokens": dict(train=len(train_data), val=len(val_data), chars_per_token=1 / r_train),
+                    "train_time_s": elapsed,
+                    "training_throughput_mean": training_throughput_avg,
+                    "history": [dict(step=s, train=t, val=v, train_per_char=t * r_train, val_per_char=v * r_val, training_throughput=ttp)
+                                for s, t, v, ttp in history],
+                }
+                with open(f"logs/{stamp}_{run}.json", "w") as f:
+                    json.dump(log, f, indent=2)
+                torch.save({"model": raw_model.state_dict(), "config": config, **tok_state}, f"lorca_{name}_{transformer.__name__}.pt")
