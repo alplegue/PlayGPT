@@ -1,2 +1,2 @@
 # PlayGPT
-This is a small repo where I am reviewing/learning DL fundamentals for my master thesis. The course that I am following is Zero to Hero series from Andrej Karpathy and following his guidance on the exercises he proposes and playing out with the PyTorch library to get familiarised with it.
+This is a small repo where I am reviewing/learning DL fundamentals for my master thesis. The course that I am following is Zero to Hero series from Andrej Karpathy and following his guidance on the exercises he proposes and playing out with the PyTorch library to get familiarised with it. After finishing the series and building out the first decoder, I tensorized it with TensorKrowch library under supervision of its autor, how cool ;).
