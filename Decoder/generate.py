@@ -7,7 +7,7 @@ from model_optimized import DecoderOnlyTransformerOpt
 from train import PERMITTED
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--ckpt", default="lorca_char_DecoderOnlyTransformer.pt")
+parser.add_argument("--ckpt", default="cervantes_DecoderOnlyTransformerOpt_bpe-512.pt")
 parser.add_argument("--prompt", default="\n")
 parser.add_argument("--tokens", type=int, default=100)
 parser.add_argument("--temperature", type=float, default=0.8)
